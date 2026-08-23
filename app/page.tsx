@@ -1,156 +1,64 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-function Shell({
-  title,
-  subtitle,
-  badge = "Portfolio demo · local-only",
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  badge?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-black dark:text-zinc-100">
-      <div className="mx-auto max-w-6xl px-4 py-10">
-        <header className="mb-8">
-          <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">{badge}</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{title}</h1>
-          <p className="mt-2 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">{subtitle}</p>
-        </header>
-        {children}
-        <footer className="mt-10 border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-zinc-800">
-          Honest demo: no multi-tenant backend. State (if any) stays in this browser.
-        </footer>
-      </div>
-    </div>
-  );
-}
-
-function Button({
-  children,
-  onClick,
-  variant = "primary",
-  disabled,
-  type = "button",
-  className = "",
-}: {
-  children: ReactNode;
-  onClick?: () => void;
-  variant?: "primary" | "secondary" | "ghost" | "danger";
-  disabled?: boolean;
-  type?: "button" | "submit";
-  className?: string;
-}) {
-  const base =
-    "inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:opacity-50 " +
-    className;
-  const styles =
-    variant === "primary"
-      ? "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
-      : variant === "secondary"
-        ? "bg-white text-zinc-900 ring-1 ring-zinc-200 hover:bg-zinc-100 dark:bg-zinc-900 dark:text-zinc-100 dark:ring-zinc-700"
-        : variant === "danger"
-          ? "bg-red-600 text-white hover:bg-red-500"
-          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900";
-  return (
-    <button type={type} disabled={disabled} onClick={onClick} className={`${base} ${styles}`}>
-      {children}
-    </button>
-  );
-}
-
-const inputClass =
-  "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none ring-zinc-400 focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950";
+type Message = { id: string; name: string; email: string; subject: string; body: string; at: number; state: "New" | "Read" };
+const SEED: Message[] = [{ id: "seed", name: "Mina Park", email: "mina@example.com", subject: "A question about the work", body: "I found the project shelf and would like to know how you choose the next experiment.", at: Date.now() - 86400000, state: "New" }];
 
 function useLocalStorage<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(initial);
   const [ready, setReady] = useState(false);
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(key);
-      if (raw != null) setValue(JSON.parse(raw) as T);
-    } catch {
-      /* ignore */
-    }
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        // Hydrate the local inbox after the server-rendered sample message.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setValue(JSON.parse(saved) as T);
+      }
+    } catch { /* Keep the sample inbox available. */ }
     setReady(true);
   }, [key]);
-  useEffect(() => {
-    if (!ready) return;
-    localStorage.setItem(key, JSON.stringify(value));
-  }, [key, value, ready]);
+  useEffect(() => { if (ready) localStorage.setItem(key, JSON.stringify(value)); }, [key, value, ready]);
   return [value, setValue] as const;
 }
 
-function uid() {
-  return crypto.randomUUID();
-}
-
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-
-const FIELDS = ["Name", "Email", "Message"] as string[];
-
 export default function Home() {
-  const [values, setValues] = useState<Record<string, string>>(
-    Object.fromEntries(FIELDS.map((f) => [f, ""]))
-  );
-  const [sent, setSent] = useLocalStorage<{ at: number; payload: Record<string, string> }[]>("contact-forms-v1", []);
-  const [ok, setOk] = useState(false);
+  const [messages, setMessages] = useLocalStorage<Message[]>("contact-forms-v2", SEED);
+  const [selected, setSelected] = useState("seed");
+  const [filter, setFilter] = useState<"All" | Message["state"]>("All");
+  const [sent, setSent] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", subject: "", body: "" });
+  const visible = useMemo(() => messages.filter((message) => filter === "All" || message.state === filter), [filter, messages]);
+  const active = messages.find((message) => message.id === selected) ?? visible[0];
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    setSent((prev) => [{ at: Date.now(), payload: values }, ...prev].slice(0, 20));
-    setValues(Object.fromEntries(FIELDS.map((f) => [f, ""])));
-    setOk(true);
-    setTimeout(() => setOk(false), 2000);
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const message = { id: crypto.randomUUID(), ...form, at: Date.now(), state: "New" as const };
+    setMessages((current) => [message, ...current]);
+    setSelected(message.id);
+    setForm({ name: "", email: "", subject: "", body: "" });
+    setSent(true);
+    window.setTimeout(() => setSent(false), 2200);
   };
 
+  const copyActive = async () => { if (!active) return; try { await navigator.clipboard.writeText(`${active.name} <${active.email}>\n${active.subject}\n\n${active.body}`); } catch { /* Clipboard is optional. */ } };
+
   return (
-    <Shell title="Contact Forms" subtitle="Message stored only in this browser.">
-      <form onSubmit={submit} className="max-w-lg space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
-        {FIELDS.map((f) => (
-          <label key={f} className="block space-y-1">
-            <span className="text-sm font-medium">{f}</span>
-            {f.toLowerCase().includes("message") || f.toLowerCase().includes("body") ? (
-              <textarea
-                className={`${inputClass} min-h-[100px]`}
-                required
-                value={values[f] || ""}
-                onChange={(e) => setValues((v) => ({ ...v, [f]: e.target.value }))}
-              />
-            ) : (
-              <input
-                className={inputClass}
-                required
-                value={values[f] || ""}
-                onChange={(e) => setValues((v) => ({ ...v, [f]: e.target.value }))}
-              />
-            )}
-          </label>
-        ))}
-        <Button type="submit">Submit</Button>
-        {ok ? <p className="text-sm text-emerald-600">"Saved locally (no email sent)."</p> : null}
-      </form>
-      <h2 className="mb-2 mt-8 text-lg font-medium">Local submissions ({sent.length})</h2>
-      <ul className="space-y-2 text-sm">
-        {sent.map((s, i) => (
-          <li key={i} className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-            <div className="text-xs text-zinc-500">{new Date(s.at).toLocaleString()}</div>
-            <pre className="mt-1 whitespace-pre-wrap font-mono text-xs">{JSON.stringify(s.payload, null, 2)}</pre>
-          </li>
-        ))}
-      </ul>
-    </Shell>
+    <main className="correspondence-page">
+      <span className="contract-mark" dangerouslySetInnerHTML={{ __html: "<!-- THESIS: contact is a correspondence intake, not a fake email SaaS; FINISH: compose, local inbox, read state, honest delivery boundary -->" }} />
+      <div className="correspondence-shell">
+        <header className="correspondence-topbar"><Link href="/" className="correspondence-mark">INBOX / INTAKE</Link><span>correspondence room · browser only</span></header>
+        <section className="correspondence-hero"><div><p className="correspondence-kicker">leave a useful first line</p><h1>Make the first reply easier.</h1></div><p className="correspondence-deck">A small contact desk that lets you compose a message and inspect what a local submission would look like before any delivery system is attached.</p></section>
+
+        <section className="correspondence-layout" aria-labelledby="compose-heading">
+          <div className="compose-paper"><header className="correspondence-heading"><div><span>01</span><h2 id="compose-heading">Write the note</h2></div><em>{sent ? "saved locally" : "new correspondence"}</em></header><form onSubmit={submit}><div className="input-pair"><label><span>Your name</span><input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label><label><span>Your email</span><input required type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></label></div><label><span>Subject</span><input required value={form.subject} onChange={(event) => setForm((current) => ({ ...current, subject: event.target.value }))} /></label><label><span>Message</span><textarea required rows={8} value={form.body} onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))} /></label><button className="send-button" type="submit">Place in local inbox</button></form><p className="compose-note">No email is sent. This is a browser-only prototype of the intake and review loop.</p></div>
+
+          <div className="inbox-column"><header className="correspondence-heading"><div><span>02</span><h2>Local inbox</h2></div><strong>{visible.length} messages</strong></header><div className="inbox-tools"><div className="inbox-tabs" role="group" aria-label="Filter messages">{["All", "New", "Read"].map((state) => <button type="button" className={filter === state ? "active" : ""} key={state} onClick={() => setFilter(state as typeof filter)}>{state}</button>)}</div><span>select a line to read</span></div><div className="message-list">{visible.map((message) => <button type="button" className={`message-row ${active?.id === message.id ? "selected" : ""}`} key={message.id} onClick={() => { setSelected(message.id); setMessages((current) => current.map((item) => item.id === message.id ? { ...item, state: "Read" } : item)); }}><span className={`message-dot state-${message.state.toLowerCase()}`} aria-hidden="true" /><span><strong>{message.name}</strong><small>{message.subject}</small></span><time>{new Date(message.at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</time></button>)}{visible.length === 0 && <p className="empty-inbox">The inbox is quiet on this filter.</p>}</div><article className="message-preview" aria-label="Selected message"><header><span>03 / open letter</span><button type="button" onClick={copyActive} disabled={!active}>Copy</button></header>{active ? <><p className="preview-from">{active.name} <small>&lt;{active.email}&gt;</small></p><h3>{active.subject}</h3><p className="preview-body">{active.body}</p><button type="button" className="remove-message" onClick={() => { setMessages((current) => current.filter((item) => item.id !== active.id)); setSelected(""); }}>Remove message</button></> : <p className="empty-inbox">Select a message to open the letter.</p>}</article></div>
+        </section>
+        <footer className="correspondence-footer">Local correspondence prototype · no outbound email, CRM sync, or sender identity verification is implied.</footer>
+      </div>
+    </main>
   );
 }
